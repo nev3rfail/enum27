@@ -1,11 +1,11 @@
 """Python Enumerations"""
 
 import sys as _sys
-
-__all__ = ['Enum', 'IntEnum', 'unique']
+import weakref as _weakref
 
 version = 1, 1, 10
 
+_enum_registry = _weakref.WeakKeyDictionary()
 pyver = float('%s.%s' % _sys.version_info[:2])
 
 try:
@@ -138,6 +138,38 @@ class _EnumDict(dict):
         super(_EnumDict, self).__setitem__(key, value)
 
 
+class _MemberMapProxy(object):
+    """Descriptor proxy for _member_map_ to break reference cycles."""
+    def __get__(self, owner, objtype=None):
+        if owner is None:
+            return self
+        return _MemberMapView(owner)
+
+class _MemberMapView(object):
+    """View object that delegates to registry."""
+    def __init__(self, cls):
+        self._cls = cls
+    def _data(self):
+        return _enum_registry.get(self._cls, {})
+    def __getitem__(self, key):
+        return self._data()[key]
+    def __setitem__(self, key, value):
+        self._data()[key] = value
+    def __contains__(self, key):
+        return key in self._data()
+    def get(self, key, default=None):
+        return self._data().get(key, default)
+    def items(self):
+        return self._data().items()
+    def keys(self):
+        return self._data().keys()
+    def values(self):
+        return self._data().values()
+    def copy(self):
+        return dict(self._data())
+    def __len__(self):
+        return len(self._data())
+
 # Dummy value for Enum as EnumMeta explicity checks for it, but of course until
 # EnumMeta finishes running the first time the Enum class doesn't exist.  This
 # is also why there are checks in EnumMeta like `if Enum is not None`
@@ -247,7 +279,7 @@ class EnumMeta(type):
             # performance boost for any member that would not shadow
             # a DynamicClassAttribute (aka _RouteClassAttributeToGetattr)
             if member_name not in base_attributes:
-                setattr(enum_class, member_name, enum_member)
+                pass  # setattr removed for experiment
             # now add to _member_map_
             enum_class._member_map_[member_name] = enum_member
             try:

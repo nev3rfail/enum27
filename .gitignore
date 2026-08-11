@@ -1,0 +1,23 @@
+# Model weights, 19 GB. Fetch them instead:
+#   fetch-weights.sh, or the Start-BitsTransfer commands in FINDINGS.md
+glimmer/
+*.gguf
+
+# llama.cpp prebuilt binaries, 1.1 GB. Pinned to a build number in PLAN.md;
+# re-download rather than vendor, and mind the b10353 minimum.
+llama.cpp/
+
+# Agent scratch. Whatever a local model does in here is not project history.
+sandbox/
+
+# BITS writes a preallocated staging file next to its destination.
+*.tmp
+
+__pycache__/
+*.pyc
+
+venv
+.venv
+*.log
+test_*.py
+*_check.py
