@@ -6,6 +6,7 @@ import weakref as _weakref
 version = 1, 1, 10
 
 _enum_registry = _weakref.WeakKeyDictionary()
+_enum_value_registry = _weakref.WeakKeyDictionary()
 pyver = float('%s.%s' % _sys.version_info[:2])
 
 try:
@@ -140,17 +141,21 @@ class _EnumDict(dict):
 
 class _MemberMapProxy(object):
     """Descriptor proxy for _member_map_ to break reference cycles."""
-    def __get__(self, owner, objtype=None):
-        if owner is None:
+    def __get__(self, instance, owner=None):
+        if instance is None:
             return self
-        return _MemberMapView(owner)
+        if instance not in _enum_registry:
+            _enum_registry[instance] = {}
+        return _enum_registry[instance]
 
 class _MemberMapView(object):
     """View object that delegates to registry."""
     def __init__(self, cls):
         self._cls = cls
     def _data(self):
-        return _enum_registry.get(self._cls, {})
+        if self._cls not in _enum_registry:
+            _enum_registry[self._cls] = {}
+        return _enum_registry[self._cls]
     def __getitem__(self, key):
         return self._data()[key]
     def __setitem__(self, key, value):
@@ -170,6 +175,34 @@ class _MemberMapView(object):
     def __len__(self):
         return len(self._data())
 
+
+class _ValueMapView(object):
+    """View object that delegates to value registry."""
+    def __init__(self, cls):
+        self._cls = cls
+    def _data(self):
+        if self._cls not in _enum_value_registry:
+            _enum_value_registry[self._cls] = {}
+        return _enum_value_registry[self._cls]
+    def __getitem__(self, key):
+        return self._data()[key]
+    def __setitem__(self, key, value):
+        self._data()[key] = value
+    def __contains__(self, key):
+        return key in self._data()
+    def get(self, key, default=None):
+        return self._data().get(key, default)
+    def __len__(self):
+        return len(self._data())
+
+class _ValueMapProxy(object):
+    """Descriptor proxy for _value2member_map_ to break reference cycles."""
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        if instance not in _enum_value_registry:
+            _enum_value_registry[instance] = {}
+        return _enum_value_registry[instance]
 # Dummy value for Enum as EnumMeta explicity checks for it, but of course until
 # EnumMeta finishes running the first time the Enum class doesn't exist.  This
 # is also why there are checks in EnumMeta like `if Enum is not None`
@@ -178,6 +211,8 @@ Enum = None
 
 class EnumMeta(type):
     """Metaclass for Enum"""
+    _member_map_ = _MemberMapProxy()
+    _value2member_map_ = _ValueMapProxy()
     @classmethod
     def __prepare__(metacls, cls, bases):
         return _EnumDict()
@@ -232,14 +267,9 @@ class EnumMeta(type):
         # create our new Enum type
         enum_class = super(EnumMeta, metacls).__new__(metacls, cls, bases, classdict)
         enum_class._member_names_ = []               # names in random order
-        if OrderedDict is not None:
-            enum_class._member_map_ = OrderedDict()
-        else:
-            enum_class._member_map_ = {}             # name->value map
         enum_class._member_type_ = member_type
 
         # Reverse value->name map for hashable values.
-        enum_class._value2member_map_ = {}
 
         # instantiate them, checking for duplicates as we go
         # we instantiate first instead of checking for duplicates first in case
@@ -265,7 +295,6 @@ class EnumMeta(type):
                     enum_member._value_ = member_type(*args)
             value = enum_member._value_
             enum_member._name_ = member_name
-            enum_member.__objclass__ = enum_class
             enum_member.__init__(*args)
             # If another member with the same value was already defined, the
             # new member becomes an alias to the existing one.
@@ -447,9 +476,12 @@ class EnumMeta(type):
         resulting in an inconsistent Enumeration.
 
         """
-        member_map = cls.__dict__.get('_member_map_', {})
-        if name in member_map:
-            raise AttributeError('Cannot reassign members.')
+        member_map = cls.__dict__.get('_member_map_')
+        if member_map is not None:
+            # Use registry directly to avoid descriptor recursion during init
+            data = _enum_registry.get(cls, {})
+            if name in data:
+                raise AttributeError('Cannot reassign members.')
         super(EnumMeta, cls).__setattr__(name, value)
 
     def _create_(cls, class_name, names=None, module=None, type=None, start=1):
